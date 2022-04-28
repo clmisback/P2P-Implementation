@@ -11,6 +11,8 @@ import sys
 import threading
 import os
 
+import time
+
 from tkinter import *
 from random import *
 
@@ -63,9 +65,15 @@ class BTGui(Frame):
 		if self.fileList.size() > 0:
 			self.fileList.delete(0, self.fileList.size() - 1)
 		for f in self.btpeer.files:
-			p = self.btpeer.files[f]
-			if not p:
+			p = ""
+			if len(self.btpeer.files[f]) == 1:
 				p = '(local)'
+			else:
+				for x in self.btpeer.files[f][1]:
+					# print("x:" + x)
+					p += x[x.index(":") +1:] + ","
+				p = p[:-1]
+				
 			self.fileList.insert( END, "%s:%s" % (f,p) )
 		
 		
@@ -161,23 +169,47 @@ class BTGui(Frame):
 		self.searchEntry.delete( 0, len(key) )
 
 		for p in self.btpeer.getpeerids():
-			self.btpeer.sendtopeer( p, 
-											QUERY, "%s %s 4" % ( self.btpeer.myid, key ) )
-
+			self.btpeer.sendtopeer( p, QUERY, "%s %s 4" % ( self.btpeer.myid, key ) )
+		
+		self.updateFileList()
 
 	def onFetch(self):
 		sels = self.fileList.curselection()
 		if len(sels)==1:
-			sel = self.fileList.get(sels[0]).split(':')
-			if len(sel) > 2:  # fname:host:port
-				fname,host,port = sel
-				resp = self.btpeer.connectandsend( host, port, FILEGET, fname )
-				print("going to write file")
-				if len(resp) and resp[0][0] == b'FILE':
-					fd = open( str(self.btpeer.serverport) + "/" + fname, 'wb' )
-					fd.write( resp[0][1] )
-					fd.close()
-					self.btpeer.files[fname] = None  # because it's local now
+			sel = self.fileList.get(sels[0])
+			fname = sel[:sel.index(":")]
+			
+			i = 0
+			maxIndex = int(self.btpeer.files[fname][0]) / 1000000
+			
+			# start_time = time.time()
+			
+			fd = open( str(self.btpeer.serverport) + "/" + fname, 'w+' )
+			fd.close()
+			
+			while i <= maxIndex:
+				for peer in self.btpeer.files[fname][1]:
+					host, port = peer.split(":")
+					
+					t = threading.Thread( target = self.multiFetch, args = [ host, port, FILEGET, "%s,%d" % (fname, i), fname, i ] )
+					t.start()
+					
+					i += 1
+				print(i)
+			
+			self.updateFileList()
+			
+			# print("--- %s seconds ---" % (time.time() - start_time))
+
+	
+	def multiFetch(self, host, port, msgtype, msgdata, fname, index):
+		resp = self.btpeer.connectandsend( host, port, msgtype, msgdata)
+	
+		if len(resp) and resp[0][0] == 'FILE':
+			fd = open( str(self.btpeer.serverport) + "/" + fname, 'r+b' )
+			fd.seek(index * 1000000)
+			fd.write( resp[0][1] )
+			fd.close()
 
 
 	def onRemove(self):
@@ -209,10 +241,6 @@ class BTGui(Frame):
 #				host,port = self.btpeer.getpeer( peerid )
 
 
-
-
-
-
 def main():
 	if len(sys.argv) < 4:
 		print("Syntax: %s server-port max-peers peer-ip:port" % sys.argv[0])
@@ -221,6 +249,7 @@ def main():
 	serverport = int(sys.argv[1])
 	maxpeers = sys.argv[2]
 	peerid = sys.argv[3]
+	
 	app = BTGui( firstpeer=peerid, maxpeers=maxpeers, serverport=serverport )
 	app.mainloop()
 

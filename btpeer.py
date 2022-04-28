@@ -17,7 +17,7 @@ def btdebug( msg ):
 class BTPeer:
 
 	def __init__( self, maxpeers, serverport, myid=None, serverhost = None ):
-		self.debug = 1
+		self.debug = 0
 
 		self.maxpeers = int(maxpeers)
 		self.serverport = int(serverport)
@@ -51,23 +51,21 @@ class BTPeer:
 
 	def __handlepeer( self, clientsock ):
 
-		self.__debug( 'New child ' + str(threading.currentThread().getName()) )
-		self.__debug( 'Connected ' + str(clientsock.getpeername()) )
+		# self.__debug( 'New child ' + str(threading.currentThread().getName()) )
+		# self.__debug( 'Connected ' + str(clientsock.getpeername()) )
 
 		host, port = clientsock.getpeername()
 		peerconn = BTPeerConnection( self.myid, host, port, clientsock, debug=False )
 
 		try:
 			msgtype, msgdata = peerconn.recvdata()
-			print(str(type(msgtype)))
-			msgtype = msgtype.decode('utf-8')
+			# msgtype = msgtype.decode('utf-8')
 			if msgtype: msgtype = msgtype.upper()
 			if msgtype not in self.handlers:
 				self.__debug( 'Not handled: %s: %s' % (msgtype, msgdata) )
 			else:
 				self.__debug( 'Handling peer msg: %s: %s' % (msgtype, msgdata) )
 				self.handlers[ msgtype ]( peerconn, msgdata )
-				self.__debug("exiting handlers early")
 		except KeyboardInterrupt:
 			raise
 			self.shutdown = True
@@ -75,7 +73,7 @@ class BTPeer:
 			if self.debug:
 				traceback.print_exc()
 		
-		self.__debug( 'Disconnecting ' + str(clientsock.getpeername()) )
+		# self.__debug( 'Disconnecting ' + str(clientsock.getpeername()) )
 		peerconn.close()
 
 	# end handlepeer method
@@ -167,10 +165,9 @@ class BTPeer:
 			return None
 		#host,port = self.peers[nextpid]
 		return self.connectandsend( host, port, msgtype, msgdata, pid=nextpid, waitreply=waitreply )
-	
 
-	def connectandsend( self, host, port, msgtype, msgdata, 
-			pid=None, waitreply=True ):
+
+	def connectandsend( self, host, port, msgtype, msgdata, pid=None, waitreply=True ):
 		msgreply = []
 		try:
 			peerconn = BTPeerConnection( pid, host, port, debug=self.debug )
@@ -200,7 +197,7 @@ class BTPeer:
 		for pid in self.peers:
 			isconnected = False
 			try:
-				self.__debug( 'Check live %s' % pid )
+				# self.__debug( 'Check live %s' % pid )
 				host,port = self.peers[pid]
 				peerconn = BTPeerConnection( pid, host, port, debug=self.debug )
 				peerconn.senddata( 'PING', '' )
@@ -223,7 +220,7 @@ class BTPeer:
 		s.settimeout(2)
 		self.__debug( 'Server started: %s (%s:%d)'
 				  % ( self.myid, self.serverhost, self.serverport ) )
-		
+
 		while not self.shutdown:
 			try:
 				self.__debug( 'Listening for connections...' )
@@ -264,8 +261,10 @@ class BTPeerConnection:
 	def __init__( self, peerid, host, port, sock=None, debug=True ):
 
 		self.id = peerid
-		print(str(self.id))
-		self.debug = debug
+		self.debug = False
+		
+		self.host = host
+		self.port = port
 
 
 		if not sock:
@@ -278,14 +277,14 @@ class BTPeerConnection:
 
 
 	def __makemsg( self, msgtype, msgdata ):
-		self.__debug("start of makemsg")
 		msglen = len(msgdata)
+		self.__debug("msg len is %d" % (msglen))
+		self.__debug("msg data is %s" % (msgdata))
 		if msgtype != "FILE":
 			msgdata = msgdata.encode('utf-8')
 		msgtype = msgtype.encode('utf-8')
 		msg = struct.pack( "!4sL%ds" % msglen, msgtype, msglen, msgdata )
 		#print("msg" + str(msg))
-		self.__debug("end of makemsg")
 		return msg
 
 
@@ -295,10 +294,11 @@ class BTPeerConnection:
 
 
 	def senddata( self, msgtype, msgdata ):
-		
-		self.__debug("senddata function")
+
 		try:
 			msg = self.__makemsg( msgtype, msgdata )
+			if msgtype != 'FILE':
+				self.__debug( "Sending %s with data %s" % (msgtype, msgdata))
 			self.sd.write( msg )
 			self.sd.flush()
 		except KeyboardInterrupt:
@@ -313,25 +313,23 @@ class BTPeerConnection:
 
 	def recvdata( self ):
 		try:
-			msgtype = self.sd.read( 4 )
+			msgtype = self.sd.read( 4 ).decode('utf-8')
+			
 			if not msgtype: return (None, None)
 
 			lenstr = self.sd.read( 4 )
 			msglen = int(struct.unpack( "!L", lenstr )[0])
 			msg = ""
-			print("msg of type: " + str(msgtype))
 
-			if msgtype == b'FILE':
-				print("FILE!!!!")
+			if msgtype == 'FILE':
 				msg = b""
 				while len(msg) != msglen:
 					data = self.sd.read( min(2048, msglen - len(msg)) )
 					if not len(data):
 						break
 					msg += data
-				
+
 			else:
-				print("not a FILE!!!!")
 				while len(msg) != msglen:
 					data = self.sd.read( min(2048, msglen - len(msg)) )
 					if not len(data):

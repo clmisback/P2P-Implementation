@@ -11,6 +11,7 @@ QRESPONSE = "RESP"
 FILEGET = "FGET"
 SENDFILE = "FILE"
 PEERQUIT = "QUIT"
+PEERPING = "PING"
 
 REPLY = "REPL"
 ERROR = "ERRO"
@@ -36,7 +37,8 @@ class FilerPeer(BTPeer):
 				QRESPONSE: self.__handle_qresponse,
 				FILEGET: self.__handle_fileget,
 				SENDFILE: self.__handle_fileget,
-				PEERQUIT: self.__handle_quit
+				PEERQUIT: self.__handle_quit,
+				PEERPING: self.__handle_ping
 			   }
 		for mt in handlers:
 			self.addhandler(mt, handlers[mt])
@@ -102,10 +104,6 @@ class FilerPeer(BTPeer):
 		peerconn.senddata(REPLY, self.myid)
 
 
-
-	# QUERY arguments: "return-peerid key ttl"
-
-
 	def __handle_query(self, peerconn, data):
 	# self.peerlock.acquire()
 		try:
@@ -121,16 +119,24 @@ class FilerPeer(BTPeer):
 
 
 	def __processquery(self, peerid, key, ttl):
+		fpeerid = None
+		self.__debug("Searching for %s" % (str(key)))
+		print(self.files)
 		for fname in self.files.keys():
-			if key in fname:
-				fpeerid = self.files[fname]
-			if not fpeerid:   # local files mapped to None
-				fpeerid = self.myid
-			host,port = peerid.split(':')
+			if key == fname:
+				fpeerid = " ".join(str(x) for x in self.files[fname])
+				if len(self.files[fname]) == 1:
+					fpeerid += " " + str(self.myid)
+				host,port = peerid.split(':')
+			# print("fpeerid:" + str(fpeerid))
+			# print("host:" + str(host))
+			# print("port:" + str(port))
+			# self.__debug("host = %s, port = %s" % (host, port))
 			# can't use sendtopeer here because peerid is not necessarily
 			# an immediate neighbor
+		if fpeerid:
 			self.connectandsend(host, int(port), QRESPONSE, '%s %s' % (fname, fpeerid), pid=peerid)
-			return
+		return
 		# will only reach here if key not found... in which case
 		# propagate query to neighbors
 		if ttl > 0:
@@ -141,38 +147,52 @@ class FilerPeer(BTPeer):
 
 	def __handle_qresponse(self, peerconn, data):
 		try:
-			fname, fpeerid = data.split()
+			self.__debug("qresp: data = %s" % str(data))
+			# print(type(data))
+			splitData = data.split()
+			# print(splitData)
+			fname = splitData[0]
+			fsize = splitData[1]
+			fpeerids = splitData[2:]
+			# print(fname)
+			# print(fsize)
+			# print(fpeerids)
+			self.__debug("%s" % str(self.files))
 			if fname in self.files:
-				self.__debug('Can\'t add duplicate file %s %s' % (fname, fpeerid))
+				for fpeerid in fpeerids:
+					if fpeerid not in self.files[fname]:
+						self.files[fname][1].append(fpeerid)
+						self.__debug('%s' % (self.files[fname]))
+					else:
+						self.__debug('Can\'t add duplicate peer to file %s %s' % (fname, fpeerid))
 			else:
-				self.files[fname] = fpeerid
+				# print(self.id)
+				# print("%s %s" % (peerconn.host, peerconn.port))
+				self.files[fname] = [fsize, fpeerids]
+			self.__debug('%s' % (self.files[fname]))
 		except:
 			#if self.debug:
 			traceback.print_exc()
 
 
 	def __handle_fileget(self, peerconn, data):
-		fname = data
+		fname, sIndex = data.split(",")
+		sIndex = int(sIndex) * 1000000
+		
 		if fname not in self.files:
 			self.__debug('File not found %s' % fname)
 			peerconn.senddata(ERROR, 'File not found')
 			return
 		try:
-			# print(peerconn.id)
-			# print(str(peerconn.id).split(":")[1] + "/" + fname)
 			filepath = str(peerconn.id).split(":")[1] + "/" + fname
 			fd = open(filepath, 'rb')
-			print("file size:" + str(os.path.getsize(filepath)))
-			filedata = b''
+			fd.seek(sIndex)
+			self.__debug("file size: %s" % str(os.path.getsize(filepath)))
 			
-			while True:
-				data = fd.read(2048)
-				# print("some data: " + str(data))
-				if not len(data):
-					break;
-				filedata += data
+			filedata = b""
+			filedata = fd.read(1000000)
+			
 			fd.close()
-			# self.peerconn.sd.shutdown()
 		except:
 			self.__debug('Error reading file %s' % fname)
 			peerconn.senddata(ERROR, 'Error reading file')
@@ -201,8 +221,14 @@ class FilerPeer(BTPeer):
 			self.peerlock.release()
 
 
+	def __handle_ping(self, peerconn, data):
+		try:
+			peerconn.senddata(REPLY, "Pong!")
+		except:
+			peerconn.senddata(ERROR, 'Error pinging')
+
 	def buildpeers(self, host, port, hops=1):
-		if self.maxpeersreached() or not hops:
+		if self.maxpeersreached() or not hops or port == 0:
 			return
 
 		peerid = None
@@ -239,5 +265,7 @@ class FilerPeer(BTPeer):
 
 
 	def addlocalfile(self, filename):
-		self.files[filename] = None
+		self.files[filename] = []
+		self.files[filename].append(os.path.getsize(str(self.serverport) + "/" + filename))
+		# print(self.files[filename][0])
 		self.__debug("Added local file %s" % filename)
