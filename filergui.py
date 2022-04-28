@@ -66,7 +66,7 @@ class BTGui(Frame):
 			self.fileList.delete(0, self.fileList.size() - 1)
 		for f in self.btpeer.files:
 			p = ""
-			if len(self.btpeer.files[f]) == 1:
+			if len(self.btpeer.files[f]) == 1 or os.path.exists(str(self.btpeer.serverport) + "/" + f):
 				p = '(local)'
 			else:
 				for x in self.btpeer.files[f][1]:
