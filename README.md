@@ -2,7 +2,7 @@
 
 This is a python 3.10 implementation of a P2P file sharing network which is a modified version of [PeerBase](https://github.com/nadeemabdulhamid/PeerBase). It utilizes the native python TCP sockets to transmit data and download files from multiple peers at once.
 
-##Instructions to launch
+## Instructions to launch
 
 '''
 python filergui.py <server-port> <max-peers> <peer-ip:port>
